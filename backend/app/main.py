@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.deals import router as deals_router
 from app.api.instruments import router as instruments_router
 from app.db.database import Base, SessionLocal, engine
+from app.db.migrations import ensure_deal_columns
 from app.db.seed import seed_data
 
 app = FastAPI(title="DANEM Sales Copilot")
@@ -20,6 +21,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup():
     Base.metadata.create_all(bind=engine)
+    ensure_deal_columns(engine)
     db = SessionLocal()
     try:
         seed_data(db)

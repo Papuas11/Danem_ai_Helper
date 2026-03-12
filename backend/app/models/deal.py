@@ -26,6 +26,7 @@ class Deal(Base):
     missing_fields: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_steps: Mapped[str | None] = mapped_column(Text, nullable=True)
     draft_reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     calculated_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     calculated_cost: Mapped[float | None] = mapped_column(Float, nullable=True)
     calculated_profit: Mapped[float | None] = mapped_column(Float, nullable=True)

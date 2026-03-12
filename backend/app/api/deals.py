@@ -15,14 +15,20 @@ from app.schemas.deal import (
     DealUpdate,
 )
 from app.services.analysis_service import (
+    AIUsage,
+    ai_missing_data,
     calculate_economics,
     completeness,
+    deviation_analysis,
     draft_reply,
+    estimate_review,
     find_service,
     find_similar_deals,
     next_steps,
     parse_text,
+    probability_explanation,
     probability_score,
+    similar_deals_summary,
     warnings_list,
 )
 from app.utils.json import dumps_list, loads_list
@@ -50,6 +56,15 @@ def save_snapshot(db: Session, deal: Deal, source: str):
     )
 
 
+def _read_ai_payload(deal: Deal) -> dict:
+    if not deal.ai_payload:
+        return {}
+    try:
+        return json.loads(deal.ai_payload)
+    except json.JSONDecodeError:
+        return {}
+
+
 def to_read(db: Session, deal: Deal) -> DealRead:
     similar = find_similar_deals(db, deal.parsed_instrument_name, deal.parsed_service_type, limit=5)
     similar_items = [
@@ -65,14 +80,8 @@ def to_read(db: Session, deal: Deal) -> DealRead:
         for d in similar
         if d.id != deal.id
     ][:5]
-    warnings = warnings_list(
-        parse_text(db, deal.input_text),
-        {"margin": deal.calculated_margin},
-        find_service(db, deal.parsed_instrument_name, deal.parsed_service_type),
-        loads_list(deal.missing_fields),
-        deal.final_price,
-        deal.calculated_price,
-    )
+    ai_payload = _read_ai_payload(deal)
+    warnings = ai_payload.get("warnings") or []
     return DealRead(
         id=deal.id,
         title=deal.title,
@@ -91,6 +100,13 @@ def to_read(db: Session, deal: Deal) -> DealRead:
         missing_fields=loads_list(deal.missing_fields),
         next_steps=loads_list(deal.next_steps),
         draft_reply=deal.draft_reply,
+        ai_used=bool(ai_payload.get("ai_used", False)),
+        ai_fallback_used=bool(ai_payload.get("ai_fallback_used", False)),
+        ai_missing_data_suggestions=ai_payload.get("missing_data_suggestions") or [],
+        probability_explanation=ai_payload.get("probability_explanation"),
+        similar_deals_summary=ai_payload.get("similar_deals_summary"),
+        estimate_review=ai_payload.get("estimate_review") or {},
+        final_deviation_analysis=ai_payload.get("final_deviation_analysis"),
         calculated_price=deal.calculated_price,
         calculated_cost=deal.calculated_cost,
         calculated_profit=deal.calculated_profit,
@@ -109,7 +125,10 @@ def to_read(db: Session, deal: Deal) -> DealRead:
 
 
 def run_analysis(db: Session, deal: Deal):
-    parsed = parse_text(db, deal.input_text)
+    usage = AIUsage()
+    parsed, parse_usage = parse_text(db, deal.input_text)
+    usage.merge(parse_usage.ai_used, parse_usage.ai_fallback_used)
+
     service = find_service(db, parsed.instrument_name, parsed.service_type)
     required = loads_list(service.required_client_data) if service and service.required_client_data else ["количество", "тип услуги"]
     known_map = {
@@ -118,12 +137,24 @@ def run_analysis(db: Session, deal: Deal):
         "выезд": parsed.onsite if parsed.onsite != "unknown" else None,
         "прибор": parsed.instrument_name,
     }
-    completeness_score, missing = completeness(required, known_map)
+    completeness_score, missing_by_rules = completeness(required, known_map)
+    missing, missing_suggestions = ai_missing_data(required, known_map, parsed, deal.status, usage)
+    if not missing:
+        missing = missing_by_rules
+
     economics = calculate_economics(service, parsed.quantity, parsed.onsite)
-    has_similar = len(find_similar_deals(db, parsed.instrument_name, parsed.service_type, limit=3)) > 0
-    prob, _ = probability_score(parsed, completeness_score, economics.get("margin"), has_similar)
-    warn = warnings_list(parsed, economics, service, missing, deal.final_price, economics.get("price"))
-    steps = next_steps(missing, parsed, warn)
+    similar_deals = find_similar_deals(db, parsed.instrument_name, parsed.service_type, limit=5)
+    has_similar = len(similar_deals) > 0
+    prob, prob_factors = probability_score(parsed, completeness_score, economics.get("margin"), has_similar)
+
+    warn = warnings_list(parsed, economics, service, missing, deal.final_price, economics.get("price"), usage)
+    steps = next_steps(missing, parsed, warn, similar_deals, deal.status, usage)
+    reply = draft_reply(parsed, missing, economics.get("price"), service.onsite_available if service else None, usage)
+
+    prob_explain = probability_explanation(prob, prob_factors, parsed, missing, usage)
+    similar_summary = similar_deals_summary(similar_deals, parsed, usage)
+    estimate_notes = estimate_review(economics, similar_deals, usage)
+    final_deviation = deviation_analysis(deal, usage)
 
     deal.parsed_instrument_name = parsed.instrument_name
     deal.parsed_service_type = parsed.service_type
@@ -139,7 +170,20 @@ def run_analysis(db: Session, deal: Deal):
     deal.calculated_margin = economics.get("margin")
     deal.deal_probability = prob
     deal.next_steps = dumps_list(steps)
-    deal.draft_reply = draft_reply(parsed, missing, economics.get("price"))
+    deal.draft_reply = reply
+    deal.ai_payload = json.dumps(
+        {
+            "ai_used": usage.ai_used,
+            "ai_fallback_used": usage.ai_fallback_used,
+            "missing_data_suggestions": missing_suggestions,
+            "probability_explanation": prob_explain,
+            "similar_deals_summary": similar_summary,
+            "estimate_review": estimate_notes,
+            "final_deviation_analysis": final_deviation,
+            "warnings": warn,
+        },
+        ensure_ascii=False,
+    )
 
 
 @router.get("/deals", response_model=list[DealRead])
