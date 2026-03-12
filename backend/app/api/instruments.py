@@ -5,6 +5,8 @@ from app.db.database import get_db
 from app.models.instrument import Instrument, InstrumentAlias, InstrumentService
 from app.schemas.instrument import (
     AliasCreate,
+    InstrumentAssistRequest,
+    InstrumentAssistResponse,
     InstrumentCreate,
     InstrumentRead,
     InstrumentUpdate,
@@ -12,6 +14,8 @@ from app.schemas.instrument import (
     ServiceRead,
     ServiceUpdate,
 )
+from app.services.ai_prompts import build_instrument_assist_prompt
+from app.services.openai_service import openai_service
 from app.utils.json import dumps_list, loads_list
 from app.utils.text import normalize_text
 
@@ -169,3 +173,37 @@ def delete_service(service_id: int, db: Session = Depends(get_db)):
     db.delete(service)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/instruments/assist", response_model=InstrumentAssistResponse)
+def instrument_assist(payload: InstrumentAssistRequest, db: Session = Depends(get_db)):
+    categories = [row[0] for row in db.query(Instrument.category).distinct().all() if row[0]]
+    services = [row[0] for row in db.query(InstrumentService.service_type).distinct().all() if row[0]]
+    fallback = {
+        "aliases": [],
+        "likely_category": categories[0] if categories else None,
+        "likely_required_client_data": [],
+        "likely_issued_documents": [],
+        "likely_service_mappings": services[:3],
+    }
+    ai = openai_service.ask_json(
+        build_instrument_assist_prompt(
+            {
+                "instrument_name": payload.instrument_name,
+                "free_text_context": payload.free_text_context,
+                "known_categories": categories,
+                "known_services": services,
+            }
+        ),
+        fallback=fallback,
+    )
+    data = ai.data
+    return InstrumentAssistResponse(
+        ai_used=ai.ai_used,
+        ai_fallback_used=ai.fallback_used,
+        aliases=data.get("aliases") if isinstance(data.get("aliases"), list) else [],
+        likely_category=data.get("likely_category"),
+        likely_required_client_data=data.get("likely_required_client_data") if isinstance(data.get("likely_required_client_data"), list) else [],
+        likely_issued_documents=data.get("likely_issued_documents") if isinstance(data.get("likely_issued_documents"), list) else [],
+        likely_service_mappings=data.get("likely_service_mappings") if isinstance(data.get("likely_service_mappings"), list) else [],
+    )

@@ -46,6 +46,13 @@ class DealRead(BaseModel):
     missing_fields: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
     draft_reply: str | None
+    ai_used: bool = False
+    ai_fallback_used: bool = False
+    ai_missing_data_suggestions: list[str] = Field(default_factory=list)
+    probability_explanation: str | None = None
+    similar_deals_summary: str | None = None
+    estimate_review: dict = Field(default_factory=dict)
+    final_deviation_analysis: dict | None = None
     calculated_price: float | None
     calculated_cost: float | None
     calculated_profit: float | None

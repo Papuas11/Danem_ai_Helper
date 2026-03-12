@@ -70,3 +70,18 @@ class InstrumentRead(InstrumentCreate):
 
     class Config:
         from_attributes = True
+
+
+class InstrumentAssistRequest(BaseModel):
+    instrument_name: str
+    free_text_context: str | None = None
+
+
+class InstrumentAssistResponse(BaseModel):
+    ai_used: bool = False
+    ai_fallback_used: bool = False
+    aliases: list[str] = Field(default_factory=list)
+    likely_category: str | None = None
+    likely_required_client_data: list[str] = Field(default_factory=list)
+    likely_issued_documents: list[str] = Field(default_factory=list)
+    likely_service_mappings: list[str] = Field(default_factory=list)

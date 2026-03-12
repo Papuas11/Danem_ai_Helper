@@ -68,7 +68,7 @@ def seed_data(db: Session):
             "Ремонт thermometer 1 шт, срочно",
         ]
         for idx, text in enumerate(examples, start=1):
-            parsed = parse_text(db, text)
+            parsed, _ = parse_text(db, text)
             db.add(
                 Deal(
                     title=f"Seed deal {idx}",
