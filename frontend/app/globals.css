@@ -1,0 +1,8 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: Arial, sans-serif; background: #f7f8fa; color: #111; }
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.tabs button { margin-right: 8px; }
+.card { background: white; border-radius: 8px; padding: 14px; margin-bottom: 12px; border: 1px solid #ddd; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+textarea, input, select { width: 100%; padding: 8px; margin-top: 4px; }
+pre { white-space: pre-wrap; }
